@@ -62,7 +62,27 @@ h1 {
   display: inline-block;
   color: rgba(255,255,255,.95);
 }
-
+#vars-control {
+  position: absolute;
+  left: 0em;
+  top:0em;
+  border: 0;
+  width: 30%;
+  z-index: 1;
+}
+#vars-control .input-control {
+  text-align: left;
+  display: inline-block;
+  color: rgba(255,255,255,.95);
+}
+#vars-control .var-left {
+  padding-left: 5px;
+  padding-right: 5px;
+  width: 10%;
+}
+#vars-control .var-right {
+  width: 80%;
+}
 .separator {
   margin: 10px 0 10px 0;
   border-bottom: 1px solid rgba(200,200,200,1);

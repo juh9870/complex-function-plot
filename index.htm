@@ -1,427 +1,623 @@
 <!DOCTYPE html>
 <html>
-<head>
-  <link href='https://fonts.googleapis.com/css?family=Roboto' rel='stylesheet' type='text/css'>
-  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.4.0/css/font-awesome.min.css">
-  <link rel="stylesheet" href="style.css">
-
-  <script>
-    (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
-    (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
-    m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
-    })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
-
-    ga('create', 'UA-66396416-1', 'auto');
-    ga('send', 'pageview');
-  </script>
-
-  <script src="https://code.jquery.com/jquery-2.1.4.min.js"></script>
-  <script src="scripts/query-string-helper.js"></script>
-  <script src="peg-0.9.0.min.js"></script>
-  <script src="three.min.js"></script>
-
-  <style>
-    #copyable-link {
-      border: 0;
-      width: 45%;
-      color: white;
-      font-size: large;
-    }
-  </style>
-
-  <title>Complex Function Plotter</title>
-</head>
-<body>
-
-  <video id="monitor" autoplay width="256" height="256" style="visibility: hidden; float:left;"></video>
-  <canvas id="videoImage" width="256" height="256" style="visibility: hidden; float:left;"></canvas>
-
-  <div id="container">
-    <div id="display-area">
-    </div>
-
-    <div class="full-width">
-
-      <div id="link-container" style="display: none;">
-        <input id="copyable-link" class="dark-translucent input-control" value=""></input>
-      </div>
-
-      <a class="dark-translucent input-control"
-         href="https://github.com/brandonpelfrey/complex-function-plot/wiki/Complex-Function-Plotter"
-         target="_blank">
-        <i id="show-instructions" class="fa fa-question-circle"></i>
-      </a>
-
-      <a id="show-link" class="dark-translucent input-control" href="#"><i class="fa fa-external-link"></a></i>
-
-      <input class="dark-translucent input-control"
-             id="equation-input"
-             placeholder="Input complex expression, e.g. 1 / (z^2 + t * i)^t - log(z)"
-             value="z - t + 0.1*z^2"></input>
-
-      <span id="texture-options">
-       <a class="dark-translucent input-control" href="#"><img class="thumbnail" src="images/uvgrid.jpg"></a>
-       <a class="dark-translucent input-control" href="#"><img class="thumbnail" src="images/birds.jpg"></a>
-       <a class="dark-translucent input-control" href="#"><img class="thumbnail" src="images/damask.jpg"></a>
-       <a class="dark-translucent input-control" href="#"><img class="thumbnail" src="images/geometric.png"></a>
-       <a class="dark-translucent input-control" href="#"><img class="thumbnail" src="images/branches.jpg"></a>
-       <a class="dark-translucent input-control" href="#"><img class="thumbnail" src="images/knots.jpg"></a>
-       <a class="dark-translucent input-control" href="#"><i class="fa fa-video-camera"></i></a>
-     </span>
-    </div>
-
-  </div>
-
-  <script src="scripts/webcam-stream.js"></script>
-
-  <script type="peg-grammar" id="complex-expression-peg-grammar">
-  /*
-   * Complex Arithmetic Grammar
-   * (Utilizes http://pegjs.org/ to build a parser based on this grammar)
-   */
-
-  {
-    function combine(first, rest, combiners) {
-      var result = first, i;
-      for (i = 0; i < rest.length; i++) {
-        result = combiners[rest[i][1]](result, rest[i][3]);
-      }
-      return result;
-    }
-  }
-
-  Expression
-    = first:Term rest:(_ ("+" / "-") _ Term)* _ {
-        return combine(first, rest, {
-          "+": function(left, right) { return 'complex_add(' + left + ',' + right + ')'; },
-          "-": function(left, right) { return 'complex_sub(' + left + ',' + right + ')'; }
-        });
-      }
-
-  Term
-    = first:Powered rest:(_ ("*" / "/") _ Powered)* {
-        return combine(first, rest, {
-          "*": function(left, right) { return 'complex_mul(' + left + ',' + right + ')'; },
-          "/": function(left, right) { return 'complex_div(' + left + ',' + right + ')'; }
-        });
-      }
-
-  Powered
-    =  _ left:Factor _ "^" _ right:Factor _ { return 'complex_pow(' + left + ',' + right + ')'; }
-    / Factor
-
-  Factor
-    = "(" _ expr:Expression _ ")" { return expr; }
-    / _ "log"  _ "(" _ arg:Expression _ ")" _ { return 'complex_log(' + arg + ')'; }
-    / _ "cos"  _ "(" _ arg:Expression _ ")" _ { return 'complex_cos(' + arg + ')'; }
-    / _ "sin"  _ "(" _ arg:Expression _ ")" _ { return 'complex_sin(' + arg + ')'; }
-    / _ "iter" _ "(" _ arg:Expression _ "," _ count:PositiveInteger _ ")" _ {
-      var n = parseInt(count) - 1, Q = arg;
-      for(var it=0; it < n; ++it) {
-        Q = Q.replace(/complex\(a,b\)/g, '(' + Q + ')');
-      }
-      return Q;
-    }
-    / Complex
-
-  Complex
-    = "<" _ a:Real _ "," _ b:Real _ ">" { return 'complex(' + a + ',' + b + ')'; }
-    / "z"     { return 'complex(a,b)'; }
-    / "i"     { return 'complex(0.0,1.0)'; }
-    / a:Real  { return 'complex(' + a + ',0.0)'; }
-
-  Real
-    = whole:Integer "." fractional:Integer { return '' + whole + '.' + fractional; }
-    / whole:Integer { return '' + whole + '.0'; }
-    / "pi" { return '3.14159265359'; }
-    / "e" { return '2.7182818284'; }
-    / "a" { return 'a'; }
-    / "b" { return 'b'; }
-    / "theta" { return 'complex_theta(a,b)'; }
-    / "t" { return 't'; }
-    / "r"     { return 'complex_r(a,b)'; }
-
-  Integer "integer"
-    = "-" int:Integer { return "-" + int;}
-    / PositiveInteger
-
-  PositiveInteger
-    = [0-9]+ { return text(); }
-
-  _ "whitespace"
-    = [ \t\n\r]*
-  </script>
-
-  <!-- Shaders -->
-	<script type="x-shader/x-vertex" id="vertexshader">
-		// switch on high precision floats
-    precision highp float;
-
-    varying vec2 vUv;
-    uniform float t;
-
-		void main()
-		{
-      vUv = uv;
-			gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
-		}
-	</script>
-
-	<script type="x-shader/x-fragment" id="fragmentshader">
-    precision highp float;
-
-    #define M_PI 3.1415926535897932384626433832795
-    #define M_E 2.7182818284
-
-    #define A x.x
-    #define B x.y
-    #define C y.x
-    #define D y.y
-
-    varying vec2 vUv;
-    uniform float t;
-    uniform float width, height;
-    uniform sampler2D gridTexture;
-
-    // Convert from Hue,Saturation/Value to RGB
-    // http://lolengine.net/blog/2013/07/27/rgb-to-hsv-in-glsl
-    vec3 hsv2rgb(vec3 c)
-    {
-      vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
-      vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-      return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
-    }
-
-    float arg(vec2 x) { return atan(B,A); }
-
-    float complex_r(float x, float y) { return length(vec2(x,y)); }
-    float complex_theta(float x, float y) { return arg(vec2(x,y)); }
-    vec2 complex(float x, float y) { return vec2(x,y); }
-
-    // https://en.wikipedia.org/wiki/Complex_number#Elementary_operations
-    vec2 complex_add(vec2 x, vec2 y) { return x + y; }
-    vec2 complex_sub(vec2 x, vec2 y) { return x - y; }
-    vec2 complex_mul(vec2 x, vec2 y) { return vec2( A*C-B*D, B*C+A*D); }
-    vec2 complex_div(vec2 x, vec2 y) { return vec2( (A*C+B*D)/(C*C+D*D), (B*C-A*D)/(C*C+D*D)); }
-
-    // http://www.abecedarical.com/zenosamples/zs_complexnumbers.html
-    vec2 complex_pow(vec2 x, vec2 y) {
-      float rho = length(x);
-      float theta = arg(x);
-      float angle = C * theta + D * log(rho);
-      float real = cos(angle);
-      float imag = sin(angle);
-      return vec2(real, imag) * (pow(rho, C) * pow(M_E, -D * theta));
-    }
-
-    vec2 complex_sin(vec2 x) {
-      vec2 iz = complex_mul(vec2(0.0, 1.0), x);
-      vec2 inz = complex_mul(vec2(0.0, -1.0), x);
-      vec2 eiz = complex_pow( vec2(M_E, 0.0), iz );
-      vec2 einz = complex_pow( vec2(M_E, 0.0), inz );
-      return complex_div( eiz - einz, complex(0.0, 2.0));
-    }
-
-    vec2 complex_cos(vec2 x) {
-      vec2 iz = complex_mul(vec2(0.0, 1.0), x);
-      vec2 inz = complex_mul(vec2(0.0, -1.0), x);
-      vec2 eiz = complex_pow( vec2(M_E, 0.0), iz );
-      vec2 einz = complex_pow( vec2(M_E, 0.0), inz );
-      return complex_div( eiz + einz, complex(2.0, 0.0));
-    }
-
-    vec2 complex_log(vec2 x) {
-      return vec2( log( length(x) ), arg(x) );
-    }
-
-    bool isNan(float val)
-    {
-        return (val <= 0.0 || 0.0 <= val) ? false : true;
-    }
-
-		void main()
-		{
-      float a = vUv.x*2.0 - 1.0;
-      float b = vUv.y*2.0 - 1.0;
-      const float scale = 2.0;
-
-      // Make sure pixels are square
-      a *= scale * width / height;
-      b *= scale;
-
-      vec2 final_expr = EXPRESSION;
-
-      float L = length(final_expr);
-      if(isNan(length(final_expr)) || L > 1.0e10) {
-        discard;
-      }
-
-      // TODO : Make this user-controlled
-      if(false) {
-        // HSV Domain Coloring
-
-        float l = length(final_expr);
-        float _r = l;
-        _r = 0.8 + (sin(_r) + 1.0) * 0.5 * 0.3;
-
-        float _arg = atan(final_expr[1], final_expr[0]) / M_PI + 1.0;
-
-        vec3 hsv = vec3(_arg, 0.5, _r);
-        vec3 rgb = hsv2rgb( hsv );
-
-  			gl_FragColor = vec4(rgb, 1.0);
-
-      } else {
-        // Texture-based Domain Coloring
-        //final_expr = min(vec2(1.0, 1.0), final_expr);
-        //final_expr = max(vec2(-1.0, -1.0), final_expr);
-        vec4 tex = texture2D(gridTexture, final_expr / (2.0*scale) + vec2(0.5,-0.5));
-        gl_FragColor = vec4( tex.xyz, 1.0 );
-
-      }
-		}
-	</script>
-
-  <script>
-    // TODO : Clean this up a bit. It's still pretty messy.
-
-  	// Get the starting canvas size
-  	var WIDTH = $('#display-area').width(),
-  	    HEIGHT = $('#display-area').height();
-
-  	// Get the DOM element to attach the render canvas to
-  	var $container = $('#display-area');
-
-  	// Create a WebGL renderer, camera and a scene
-  	renderer = new THREE.WebGLRenderer();
-    camera = new THREE.OrthographicCamera( WIDTH / - 2, WIDTH / 2, HEIGHT / 2, HEIGHT / - 2, 1, 10 );
-  	scene = new THREE.Scene();
-
-    var uniforms = {
-      t: { type: "f", value: 1.0 },
-      gridTexture: { type: 't', value: null },
-      width: {type: "f", value: WIDTH},
-      height: {type: "f", value: HEIGHT}
-    };
-
-    function setTexture(url) {
-      var gridTexture = THREE.ImageUtils.loadTexture(url);
-      gridTexture.wrapS = gridTexture.wrapT = THREE.RepeatWrapping;
-      gridTexture.repeat.set( 2, 2  );
-
-      uniforms.gridTexture.value = gridTexture;
-    }
-    setTexture('images/uvgrid.jpg');
-
-  	// the camera starts at 0,0,0 so pull it back
-  	camera.position.z = 5;
-    renderer.setSize(WIDTH, HEIGHT);
-
-    function reset_camera() {
-      var WIDTH = $('#display-area').width(),
-    	    HEIGHT = $('#display-area').height();
-
-      // We need to update the uniforms passed to the shader so it can later
-      // compute the aspect ratio and maintain square pixels.
-      uniforms.width.value = WIDTH;
-      uniforms.height.value = HEIGHT;
-
-      renderer.setSize(WIDTH, HEIGHT);
-    }
-
-    reset_camera();
-
-  	// attach the render-supplied DOM element
-  	$container.append(renderer.domElement);
-
-    // Produce the Parser based on our grammar
-    $(function(){
-        window.pegParser = PEG.buildParser( $('#complex-expression-peg-grammar').text() );
-    });
-
-    // Make a full-screen quad and add it to the THREE.js scene
-    var plane = new THREE.PlaneBufferGeometry( WIDTH, HEIGHT );
-    var quad = new THREE.Mesh( plane, null );
-    quad.position.z = 0;
-		scene.add( quad );
-
-    // Whenever the user updates the input field, we need to parse and produce a
-    // new shader to update what's being displayed.
-    function update_expression() {
-      var new_expression = $('#equation-input').val();
-      var compiledExpression = pegParser.parse(new_expression);
-
-    	var shaderMaterial = new THREE.ShaderMaterial({
-        uniforms: uniforms,
-    		vertexShader:   $('#vertexshader').text(),
-    		fragmentShader: $('#fragmentshader').text().replace('EXPRESSION', compiledExpression)
-    	});
-
-      quad.material = shaderMaterial;
-    }
-
-    // When rendering, we just need to make sure our convenience variables are
-    // up-to-date before we render.
-    function render() {
-      // If we're rendering video, update that.
-      if(window.video && video.readyState === video.HAVE_ENOUGH_DATA )
-    	{
-    		videoImageContext.drawImage( video, 0, 0, videoImage.width, videoImage.height );
-    		if ( videoTexture )
-    			videoTexture.needsUpdate = true;
-    	}
-
-      quad.material.uniforms.t.value = Math.sin( new Date().getTime() * 0.001 );
-      quad.material.uniforms.t.needsUpdate = true;
-      renderer.render(scene, camera);
-
-      requestAnimationFrame(render);
-    }
-
-    // When the user clicks one of the images/webcam icon, change the background
-    $('#texture-options a').each(function() {
-      $(this).click(function() {
-        var texture_path = $(this).find('img').first().attr('src');
-        if(texture_path) {
-          setTexture(texture_path);
-        } else {
-          // Currently, the only other option here is to stream from the webcam.
-          initWebCam();
-        }
-      });
-    });
-
-    // When the user presses the button, show some copyable text
-    function showLink() {
-      var expression_base64 = btoa( $('#equation-input').val() );
-
-      var url = [location.protocol, '//', location.host, location.pathname].join('');
-      url = url + "?expression=" + expression_base64;
-
-      $('#copyable-link').val(url);
-      $('#link-container').show();
-      $('#copyable-link').select();
-    }
-    $('#copyable-link').blur(function(){
-      $('#link-container').hide();
-    });
-
-    // If the user already specified
-    $(function(){
-      var expression_base64 = getQueryVariable('expression');
-      console.log(expression_base64);
-      if( expression_base64 ) {
-        $('#equation-input').val( atob(expression_base64.replace('/', '')) );
-      }
-    });
-
-    // Get things started.
-    $('#equation-input').change( update_expression );
-    $('#show-link').click( showLink );
-    $( window ).resize( reset_camera );
-    $( update_expression );
-    $( render );
-	</script>
-
-</body>
+	<head>
+		<link href='https://fonts.googleapis.com/css?family=Roboto' rel='stylesheet' type='text/css'>
+		<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.4.0/css/font-awesome.min.css">
+		<link rel="stylesheet" href="style.css">
+		<script>
+			(function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+			(i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+			m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+			})(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+			
+			ga('create', 'UA-66396416-1', 'auto');
+			ga('send', 'pageview');
+		</script>
+		<script src="https://code.jquery.com/jquery-2.1.4.min.js"></script>
+		<script src="scripts/query-string-helper.js"></script>
+		<script src="peg-0.9.0.min.js"></script>
+		<script src="three.min.js"></script>
+		<style>
+			#copyable-link {
+			border: 0;
+			width: 45%;
+			color: white;
+			font-size: large;
+			}
+		</style>
+		<title>Complex Function Plotter</title>
+	</head>
+	<body>
+		<video id="monitor" autoplay width="256" height="256" style="visibility: hidden; float:left;"></video>
+		<canvas id="videoImage" width="256" height="256" style="visibility: hidden; float:left;"></canvas>
+		<div id="container">
+			<div id="display-area">
+			</div>
+			<div class="dark-translucent" id="vars-control">
+				<template id="pair-template">
+					<span class="pair">
+						<input class="dark-translucent input-control var-left">
+						<input class="dark-translucent input-control var-right">
+					</span>
+				</template>
+			</div>
+			<div class="full-width">
+				<div id="link-container" style="display: none;">
+					<input id="copyable-link" class="dark-translucent input-control" value=""></input>
+				</div>
+				<a class="dark-translucent input-control"
+					href="https://github.com/brandonpelfrey/complex-function-plot/wiki/Complex-Function-Plotter"
+					target="_blank">
+				<i id="show-instructions" class="fa fa-question-circle"></i>
+				</a>
+				<a id="show-link" class="dark-translucent input-control" href="#"><i class="fa fa-external-link"></i></a>
+				<a id="mirror" class="dark-translucent input-control" href="#">
+					<i class="fa fa-angle-right"></i>
+					<i id="second-arrow" class="fa fa-angle-right"></i>
+				</a>
+				<input class="dark-translucent input-control"
+					id="equation-input"
+					placeholder="Input complex expression, e.g. 1 / (z^2 + t * i)^t - log(z)"
+					value="z - t + 0.1*z^2"></input>
+				<span id="texture-options">
+				<a class="dark-translucent input-control" href="#"><img class="thumbnail" src="images/uvgrid.jpg"></a>
+				<a class="dark-translucent input-control" href="#"><img class="thumbnail" src="images/birds.jpg"></a>
+				<a class="dark-translucent input-control" href="#"><img class="thumbnail" src="images/damask.jpg"></a>
+				<a class="dark-translucent input-control" href="#"><img class="thumbnail" src="images/geometric.png"></a>
+				<a class="dark-translucent input-control" href="#"><img class="thumbnail" src="images/branches.jpg"></a>
+				<a class="dark-translucent input-control" href="#"><img class="thumbnail" src="images/knots.jpg"></a>
+				<a class="dark-translucent input-control" href="#"><i class="fa fa-folder-open-o"></i></a>
+				</span>
+				<input id="file-input" type="file" name="name" style="display: none;" />
+			</div>
+		</div>
+		<script src="scripts/webcam-stream.js"></script>
+		<script type="peg-grammar" id="complex-expression-peg-grammar">
+			/*
+			 * Complex Arithmetic Grammar
+			 * (Utilizes http://pegjs.org/ to build a parser based on this grammar)
+			 */
+			
+			{
+				function combine(first, rest, combiners) {
+				var result = first, i;
+				for (i = 0; i < rest.length; i++) {
+					result = combiners[rest[i][1]](result, rest[i][3]);
+				}
+				return result;
+				}
+			}
+			
+			Expression
+				= first:Term rest:(_ ("+" / "-") _ Term)* _ {
+					return combine(first, rest, {
+					"+": function(left, right) { return 'complex_add(' + left + ',' + right + ')'; },
+					"-": function(left, right) { return 'complex_sub(' + left + ',' + right + ')'; }
+					});
+				}
+			
+			Term
+				= first:Powered rest:(_ ("*" / "/" / "%" / "modf" / "moda" / "modb") _ Powered)* {
+					return combine(first, rest, {
+					"*": function(left, right) { return 'complex_mul(' + left + ',' + right + ')'; },
+					"/": function(left, right) { return 'complex_div(' + left + ',' + right + ')'; },
+					"modf": function(left, right) { return 'complex_mod1(' + left + ',' + right + ')'; },
+					"moda": function(left, right) { return 'complex_mod2(' + left + ',' + right + ')'; },
+					"modb": function(left, right) { return 'complex_mod3(' + left + ',' + right + ')'; }
+					});
+				}
+			
+			Powered
+				=  _ left:Factor _ "^" _ right:Factor _ { return 'complex_pow(' + left + ',' + right + ')'; }
+				/ Factor
+			
+			Factor
+				= "(" _ expr:Expression _ ")" { return expr; }
+				/ _ "log"  _ "(" _ arg:Expression _ ")" _ { return 'complex_log(' + arg + ')'; }
+				/ _ "cos"  _ "(" _ arg:Expression _ ")" _ { return 'complex_cos(' + arg + ')'; }
+				/ _ "sin"  _ "(" _ arg:Expression _ ")" _ { return 'complex_sin(' + arg + ')'; }
+				/ _ "tan"  _ "(" _ arg:Expression _ ")" _ { return 'complex_tan(' + arg + ')'; }
+				/ _ "ctg"  _ "(" _ arg:Expression _ ")" _ { return 'complex_ctg(' + arg + ')'; }
+				/ _ "abs"  _ "(" _ arg:Expression _ ")" _ { return 'complex_abs(' + arg + ')'; }
+				/ _ "conj"  _ "(" _ arg:Expression _ ")" _ { return 'complex_conj(' + arg + ')'; }
+				/ _ "re"  _ "(" _ arg:Expression _ ")" _ { return 'complex_real(' + arg + ')'; }
+				/ _ "im"  _ "(" _ arg:Expression _ ")" _ { return 'complex_imag(' + arg + ')'; }
+				/ _ "floor"  _ "(" _ arg:Expression _ ")" _ { return 'complex_floor(' + arg + ')'; }
+				/ _ "ceil"  _ "(" _ arg:Expression _ ")" _ { return 'complex_ceil(' + arg + ')'; }
+				/ _ "iter" _ "(" _ arg:Expression _ "," _ count:PositiveInteger _ ")" _ {
+				var n = parseInt(count) - 1, Q = arg;
+				for(var it=0; it < n; ++it) {
+					Q = Q.replace(/complex\(a,b\)/g, '(' + Q + ')');
+				}
+				return Q;
+				}
+				/ Complex
+			
+			Complex
+				= "<" _ a:Real _ "," _ b:Real _ ">" { return 'complex(' + a + ',' + b + ')'; }
+				/ "z"     { return 'complex(a,b)'; }
+				/ "i"     { return 'complex(0.0,1.0)'; }
+				/ a:Real  { return 'complex(' + a + ',0.0)'; }
+			
+			Real
+				= whole:Integer "." fractional:Integer { return '' + whole + '.' + fractional; }
+				/ whole:Integer { return '' + whole + '.0'; }
+				/ "pi" { return '3.14159265359'; }
+				/ "e" { return '2.7182818284'; }
+				/ "a" { return 'a'; }
+				/ "b" { return 'b'; }
+				/ "theta" { return 'complex_theta(a,b)'; }
+				/ "t" { return 't'; }
+				/ "q" { return 'q'; }
+				/ "r"     { return 'complex_r(a,b)'; }
+			
+			Integer "integer"
+				= "-" int:Integer { return "-" + int;}
+				/ PositiveInteger
+			
+			PositiveInteger
+				= [0-9]+ { return text(); }
+			
+			_ "whitespace"
+				= [ \t\n\r]*
+		</script>
+		<!-- Shaders -->
+		<script type="x-shader/x-vertex" id="vertexshader">
+			// switch on high precision floats
+				precision highp float;
+			
+				varying vec2 vUv;
+				uniform float t;
+				uniform float q;
+			
+			void main()
+			{
+				vUv = uv;
+				gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+			}
+		</script>
+		<script type="x-shader/x-fragment" id="fragmentshader">
+			precision highp float;
+			
+			#define M_PI 3.1415926535897932384626433832795
+			#define M_E 2.7182818284
+			
+			#define A x.x
+			#define B x.y
+			#define C y.x
+			#define D y.y
+			
+			varying vec2 vUv;
+			uniform float t;
+			uniform float q;
+			uniform float width, height;
+			uniform sampler2D gridTexture;
+			
+			// Convert from Hue,Saturation/Value to RGB
+			// http://lolengine.net/blog/2013/07/27/rgb-to-hsv-in-glsl
+			vec3 hsv2rgb(vec3 c)
+			{
+				vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+				vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+				return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+			}
+			
+			float arg(vec2 x) { return atan(B,A); }
+			
+			float complex_r(float x, float y) { return length(vec2(x,y)); }
+			float complex_theta(float x, float y) { return arg(vec2(x,y)); }
+			vec2 complex(float x, float y) { return vec2(x,y); }
+			
+			// https://en.wikipedia.org/wiki/Complex_number#Elementary_operations
+			vec2 complex_add(vec2 x, vec2 y) { return x + y; }
+			vec2 complex_sub(vec2 x, vec2 y) { return x - y; }
+			vec2 complex_mul(vec2 x, vec2 y) { return vec2( A*C-B*D, B*C+A*D); }
+			vec2 complex_div(vec2 x, vec2 y) { return vec2( (A*C+B*D)/(C*C+D*D), (B*C-A*D)/(C*C+D*D)); }
+			
+			// http://www.abecedarical.com/zenosamples/zs_complexnumbers.html
+			vec2 complex_pow(vec2 x, vec2 y) {
+				float rho = length(x);
+				float theta = arg(x);
+				float angle = C * theta + D * log(rho);
+				float real = cos(angle);
+				float imag = sin(angle);
+				return vec2(real, imag) * (pow(rho, C) * pow(M_E, -D * theta));
+			}
+			
+			vec2 complex_sin(vec2 x) {
+				vec2 iz = complex_mul(vec2(0.0, 1.0), x);
+				vec2 inz = complex_mul(vec2(0.0, -1.0), x);
+				vec2 eiz = complex_pow( vec2(M_E, 0.0), iz );
+				vec2 einz = complex_pow( vec2(M_E, 0.0), inz );
+				return complex_div( eiz - einz, complex(0.0, 2.0));
+			}
+			
+			vec2 complex_cos(vec2 x) {
+				vec2 iz = complex_mul(vec2(0.0, 1.0), x);
+				vec2 inz = complex_mul(vec2(0.0, -1.0), x);
+				vec2 eiz = complex_pow( vec2(M_E, 0.0), iz );
+				vec2 einz = complex_pow( vec2(M_E, 0.0), inz );
+				return complex_div( eiz + einz, complex(2.0, 0.0));
+			}
+			vec2 complex_tan(vec2 x) {
+				return complex_div( complex_sin(x), complex_cos(x));
+			}
+			vec2 complex_ctg(vec2 x) {
+				return complex_div( complex_cos(x), complex_sin(x));
+			}
+			
+			vec2 complex_log(vec2 x) {
+				return vec2( log( length(x) ), arg(x) );
+			}
+			
+			vec2 complex_abs(vec2 x) {
+				return vec2(length(x),0.0);
+			}
+			
+			vec2 complex_conj(vec2 x) {
+				return vec2(B,A);
+			}
+			vec2 complex_real(vec2 x) {
+				return vec2(A,0);
+			}
+			vec2 complex_imag(vec2 x) {
+				return vec2(B,0);
+			}
+			vec2 complex_floor(vec2 x) {
+				return floor(x);
+			}
+			vec2 complex_ceil(vec2 x) {
+				return ceil(x);
+			}
+			
+			
+			vec2 complex_mod1(vec2 x, vec2 y) { return x-complex_mul(floor(complex_div(x,y)),y); }
+			vec2 complex_mod2(vec2 x, vec2 y) { return x-complex_mul(floor(complex_real(complex_div(x,y))),x); }
+			vec2 complex_mod3(vec2 x, vec2 y) {
+			 float lx = length(x);
+			 return complex_mul(vec2(lx-floor(lx/length(y))*lx,0),complex_div(x,complex_abs(x))); 
+			}
+			
+			
+			bool isNan(float val)
+			{
+				return (val <= 0.0 || 0.0 <= val) ? false : true;
+			}
+			
+			void main()
+			{
+				float a = vUv.x*2.0 - 1.0;
+				float b = vUv.y*2.0 - 1.0;
+				const float scale = 2.0;
+			
+				// Make sure pixels are square
+				a *= scale * width / height;
+				b *= scale;
+			
+				vec2 final_expr = EXPRESSION;
+			
+				float L = length(final_expr);
+				if(isNan(length(final_expr)) || L > 1.0e10) {
+				discard;
+				}
+			
+				// TODO : Make this user-controlled
+				if(false) {
+				// HSV Domain Coloring
+			
+				float l = length(final_expr);
+				float _r = l;
+				_r = 0.8 + (sin(_r) + 1.0) * 0.5 * 0.3;
+			
+				float _arg = atan(final_expr[1], final_expr[0]) / M_PI + 1.0;
+			
+				vec3 hsv = vec3(_arg, 0.5, _r);
+				vec3 rgb = hsv2rgb( hsv );
+			
+				gl_FragColor = vec4(rgb, 1.0);
+			
+				} else {
+				// Texture-based Domain Coloring
+				//final_expr = min(vec2(1.0, 1.0), final_expr);
+				//final_expr = max(vec2(-1.0, -1.0), final_expr);
+				vec4 tex = texture2D(gridTexture, final_expr / (2.0*scale) + vec2(0.5,-0.5));
+				//gl_FragColor = vec4( tex.xyz, 1.0 );
+				gl_FragColor = tex;
+			
+				}
+			}
+		</script>
+		<script>
+			// TODO : Clean this up a bit. It's still pretty messy.
+			
+			// Get the starting canvas size
+			var WIDTH = $('#display-area').width(),
+				 HEIGHT = $('#display-area').height();
+
+			let mirror = getQueryVariable("mirror");
+			if(mirror){
+				$("#second-arrow").toggleClass("fa-angle-right fa-angle-left");
+			}
+			
+			// Get the DOM element to attach the render canvas to
+			var $container = $('#display-area');
+			
+			// Create a WebGL renderer, camera and a scene
+			renderer = new THREE.WebGLRenderer({ alpha: true });
+			camera = new THREE.OrthographicCamera( WIDTH / - 2, WIDTH / 2, HEIGHT / 2, HEIGHT / - 2, 1, 10 );
+			scene = new THREE.Scene();
+			
+			var uniforms = {
+				t: { type: "f", value: 1.0 },
+				q: { type: "f", value: 1.0 },
+				gridTexture: { type: 't', value: null },
+				width: {type: "f", value: WIDTH},
+				height: {type: "f", value: HEIGHT}
+			};
+			
+			function escapeRegExp(string) {
+				return string.replace(/[.*+\-?^${}()|[\]\\]/g, '\\$&'); // $& means the whole matched string
+			}
+			function replaceAll(str, find, replace) {
+				return str.replace(new RegExp(find, 'g'), replace);
+			}
+
+			let lastURL;
+
+			function setTexture(url) {
+				lastURL=url;
+				var gridTexture = THREE.ImageUtils.loadTexture(url);
+				gridTexture.format=1021;
+				gridTexture.wrapS = gridTexture.wrapT = mirror?THREE.MirroredRepeatWrapping:THREE.RepeatWrapping;
+				gridTexture.repeat.set( 2, 2  );
+			
+				uniforms.gridTexture.value = gridTexture;
+			}
+			setTexture('images/uvgrid.jpg');
+			
+			// the camera starts at 0,0,0 so pull it back
+			camera.position.z = 5;
+			renderer.setSize(WIDTH, HEIGHT);
+			
+			function reset_camera() {
+				var WIDTH = $('#display-area').width(),
+					HEIGHT = $('#display-area').height();
+			
+				// We need to update the uniforms passed to the shader so it can later
+				// compute the aspect ratio and maintain square pixels.
+				uniforms.width.value = WIDTH;
+				uniforms.height.value = HEIGHT;
+			
+				renderer.setSize(WIDTH, HEIGHT);
+			}
+			
+			reset_camera();
+			
+			// attach the render-supplied DOM element
+			$container.append(renderer.domElement);
+			
+			// Produce the Parser based on our grammar
+			$(function(){
+				window.pegParser = PEG.buildParser( $('#complex-expression-peg-grammar').text() );
+			});
+			
+			// Make a full-screen quad and add it to the THREE.js scene
+			var plane = new THREE.PlaneBufferGeometry( WIDTH, HEIGHT );
+			var quad = new THREE.Mesh( plane, null );
+			quad.position.z = 0;
+			scene.add( quad );
+			
+			// Whenever the user updates the input field, we need to parse and produce a
+			// new shader to update what's being displayed.
+			function update_expression() {
+				var new_expression = $('#equation-input').val();
+
+				let vars = [];
+
+				$("#vars-control .pair").each((id,pair)=>{
+					vars.unshift(pair);
+				});
+				vars.forEach(pair=>{
+					let val = $(pair).find(".var-left").val();
+					let expr = $(pair).find(".var-right").val();
+					if(val && expr && (!val.match(/^\s*$/) && !expr.match(/^\s*$/)))
+					new_expression = replaceAll(new_expression,val,"("+expr+")");
+				});
+
+
+				var compiledExpression = pegParser.parse(new_expression);
+			
+				var shaderMaterial = new THREE.ShaderMaterial({
+				uniforms: uniforms,
+					vertexShader:   $('#vertexshader').text(),
+					fragmentShader: $('#fragmentshader').text().replace('EXPRESSION', compiledExpression)
+				});
+				shaderMaterial.transparent=true;
+			
+				quad.material = shaderMaterial;
+			}
+			
+			// When rendering, we just need to make sure our convenience variables are
+			// up-to-date before we render.
+			function render() {
+				// If we're rendering video, update that.
+				if(window.video && video.readyState === video.HAVE_ENOUGH_DATA )
+				{
+					videoImageContext.drawImage( video, 0, 0, videoImage.width, videoImage.height );
+					if ( videoTexture )
+						videoTexture.needsUpdate = true;
+				}
+			
+				quad.material.uniforms.t.value = Math.sin( new Date().getTime() * 0.001 );
+				quad.material.uniforms.t.needsUpdate = true;
+				quad.material.uniforms.q.value = (new Date().getTime() * 0.001) % 1000;
+				quad.material.uniforms.q.needsUpdate = true;
+				renderer.render(scene, camera);
+			
+				requestAnimationFrame(render);
+			}
+			
+			// When the user clicks one of the images/webcam icon, change the background
+			$('#texture-options a').each(function() {
+				$(this).click(function() {
+				var texture_path = $(this).find('img').first().attr('src');
+				if(texture_path) {
+					setTexture(texture_path);
+				} else {
+					// Currently, the only other option here is to stream from the webcam.
+					// initWebCam();
+					$("#file-input").click();
+				}
+				});
+			});
+			$("#file-input").change(function(e){
+					var file = e.target.files[0];
+					let url = window.URL.createObjectURL(file);
+					setTexture(url);
+					// window.URL.revokeObjectURL(file);
+					// alert('The file "' + fileName +  '" has been selected.');
+				});
+
+			$("#mirror").click(e=>{
+				mirror=!mirror;
+				setTexture(lastURL);
+				$("#second-arrow").toggleClass("fa-angle-right fa-angle-left");
+			});
+
+			function createPair(val,expr,_prev,_next){
+				let pair = $($("#pair-template").html());
+				let left = pair.find(".var-left");
+				let right = pair.find(".var-right");
+				left.val(val);
+				right.val(expr);
+				left.change(update_expression);
+				right.change(update_expression);
+
+				pair.prev=_prev || null;
+				pair.next = _next || null;
+
+				let hold = false;
+
+				left.on('keydown',e=>{
+					if(hold)return;
+					hold=true;
+					if(e.key==="Backspace" &&
+						(!left.val() || left.val().match(/$\s*^/)) &&
+						(!right.val() || right.val().match(/$\s*^/))){
+						if(!pair.prev && !pair.next)return;
+						if(pair.prev){
+							pair.prev[0].next=pair.next;
+							pair.prev[2].focus();
+						} else {
+							pair.next[1].focus();
+						}
+						if(pair.next){
+							pair.next[0].prev=pair.prev;
+						}
+						pair.remove();
+						return false;
+					}
+					if(e.key === "Enter"){
+						if(e.shiftKey){
+							debugger;
+							if(!pair.prev){
+								pair.prev = createPair("","",null,[pair,left,right]);
+								pair.before(pair.prev[0]);
+							} else if(e.ctrlKey){
+								let prev = createPair("","",pair.prev,[pair,left,right]);
+								pair.prev[0].next = prev;
+								pair.prev = prev;
+								pair.before(pair.prev[0]);
+							}
+							pair.prev[2].focus();
+						}
+						else right.focus();
+					}
+				});
+				left.on('keyup',e=>{
+					hold = false;
+				});
+
+
+				right.on('keydown',e=>{
+					if(hold)return;
+					hold=true;
+					if(e.key==="Backspace" && (!right.val() || right.val().match(/$\s*^/))){
+						left.focus();
+						return false;
+					}
+					if(e.key === "Enter"){
+						if(e.shiftKey)left.focus();
+						else {
+							if(!pair.next){
+								pair.next = createPair("","",[pair,left,right],null);
+								pair.after(pair.next[0]);
+							} else if(e.ctrlKey){
+								let next = createPair("","",[pair,left,right],pair.next);
+								pair.next[0].prev = next;
+								pair.next = next;
+								pair.after(next[0]);
+							}
+							pair.next[1].focus();
+						}
+					}
+				});
+				right.on('keyup',e=>{
+					hold = false;
+				});
+				return [pair,left,right];
+			}
+			
+
+			// When the user presses the button, show some copyable text
+			function showLink() {
+				let data = $('#equation-input').val();
+
+				$("#vars-control .pair").each((id,pair)=>{
+					let val = $(pair).find(".var-left").val();
+					let expr = $(pair).find(".var-right").val();
+					if(val && expr && (!val.match(/^\s*$/) && !expr.match(/^\s*$/)))
+					data+="&variable"+val+"&value"+expr;
+				});
+
+				var expression_base64 = btoa( data );
+			
+				var url = [location.protocol, '//', location.host, location.pathname].join('');
+				url = url + (mirror?"?mirror=true&":"?") + "expression=" + expression_base64;
+			
+				$('#copyable-link').val(url);
+				$('#link-container').show();
+				$('#copyable-link').select();
+			}
+			$('#copyable-link').blur(function(){
+				$('#link-container').hide();
+			});
+
+			// If the user already specified
+			$(function(){
+				var expression_base64 = getQueryVariable('expression');
+				console.log(expression_base64);
+				if( expression_base64 ) {
+					let split = atob(expression_base64.replace('/', '')).split("&variable");
+					$('#equation-input').val( split[0] );
+					let prev = null;
+					for(let i=1;i<split.length;i++){
+						let val = split[i].split("&value");
+						prev = createPair(val[0],val[1],prev);
+						$("#vars-control").append(prev[0]);
+					}
+				} else {
+					$("#vars-control").append(createPair("z","z^2")[0]);
+				}
+			});
+			
+			// Get things started.
+			$('#equation-input').change( update_expression );
+			// $('#z-change-input').change( update_expression );
+			$('#show-link').click( showLink );
+			$( window ).resize( reset_camera );
+			$( update_expression );
+			$( render );
+		</script>
+	</body>
 </html>
