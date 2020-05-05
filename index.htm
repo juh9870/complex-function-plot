@@ -604,6 +604,7 @@
 					for(let i=1;i<split.length;i++){
 						let val = split[i].split("&value");
 						prev = createPair(val[0],val[1],prev);
+						if(prev[0].prev)prev[0].prev[0].next=prev;
 						$("#vars-control").append(prev[0]);
 					}
 				} else {
